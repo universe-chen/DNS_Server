@@ -12,7 +12,6 @@ sock.bind((ip, port))
 
 
 def loadZones():
-
     jsonZone = {}
     zoneFiles = glob.glob('zones/*.zone')
 
@@ -26,9 +25,7 @@ def loadZones():
 
 
 def getFlags(data):
-
     firstByte = bytes(data[0:1])
-
     qr = '1'
 
     opcode = ''
@@ -55,6 +52,7 @@ def getQuestionDomain(data):
 
     for byte in data:
         if byte == 0:
+            domainParts.append(domainString)
             break
         if isReadingLength == True:
             # Read length
@@ -71,12 +69,11 @@ def getQuestionDomain(data):
                 isReadingLength = True
         offset += 1
 
-    questionType = data[offset:offset+2]
+    questionType = data[offset+1:offset+3]
     return (domainParts, questionType)
 
 
 def getZone(domainParts):
-
     zoneData = loadZones()
     zoneName = '.'.join(domainParts)
     return zoneData[zoneName]
@@ -92,7 +89,47 @@ def getRecs(data):
     return (zone[qt], qt, domainParts)
 
 
+def buildQuestion(domainParts, recType):
+    qbytes = b''
+
+    for part in domainParts:
+        # Add length
+        length = len(part)
+        qbytes += bytes([length])
+        # Add name
+        for char in part:
+            qbytes += ord(char).to_bytes(1, byteorder='big')
+
+    # Add type A
+    if recType == 'a':
+        qbytes += (1).to_bytes(2, byteorder='big')
+    # Add class IN
+    qbytes += (1).to_bytes(2, byteorder='big')
+    return qbytes
+
+
+def buildRecBytes(recType, recttl, recval):
+    # Compression result of length of header
+    rbytes = b'\xc0\x0c'
+
+    if recType == 'a':
+        rbytes = rbytes + bytes([0]) + bytes([1])
+
+    rbytes = rbytes + bytes([0]) + bytes([1])
+
+    rbytes += int(recttl).to_bytes(4, byteorder='big')
+
+    if recType == 'a':
+        rbytes = rbytes + bytes([0]) + bytes([4])
+
+        for part in recval.split('.'):
+            rbytes += bytes([int(part)])
+
+    return rbytes
+
+
 def buildResponse(data):
+    # Building dns header
 
     # Get transaction ID
     transactionID = data[0:2]
@@ -116,6 +153,17 @@ def buildResponse(data):
     arcount = (0).to_bytes(2, byteorder='big')
 
     dnsHeader = transactionID + flags + qdcount + ancount + nscount + arcount
+
+    # Building dns body
+    dnsBody = b''
+
+    records, recType, domainParts = getRecs(data[12:])
+    dnsQuestion = buildQuestion(domainParts, recType)
+
+    for record in records:
+        dnsBody += buildRecBytes(recType, record["ttl"], record["value"])
+
+    return dnsHeader + dnsQuestion + dnsBody
 
 
 # Start listening
