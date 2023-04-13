@@ -4,9 +4,9 @@ This is a simple dns server that handles UDP messages
 
 ## Usage
 
-Run dns server by typing in a terminal:
-`$ sudo python3 dns.py`
-Create another terminal and send a message:
+Run dns server by typing in a terminal:  
+`$ sudo python3 dns.py`  
+Create another terminal and send a message:  
 `$ dig howcode.org @127.0.0.1`
 
 ## Credits
