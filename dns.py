@@ -1,4 +1,6 @@
 import socket
+import glob
+import json
 
 # Default dns port
 port = 53
@@ -9,10 +11,23 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind((ip, port))
 
 
+def loadZones():
+
+    jsonZone = {}
+    zoneFiles = glob.glob('zones/*.zone')
+
+    for zone in zoneFiles:
+        with open(zone) as zoneData:
+            data = json.load(zoneData)
+            zoneName = data["$origin"]
+            jsonZone[zoneName] = data
+
+    return jsonZone
+
+
 def getFlags(data):
 
     firstByte = bytes(data[0:1])
-    secondByte = bytes(data[1:2])
 
     qr = '1'
 
@@ -30,6 +45,53 @@ def getFlags(data):
     return int(qr+opcode+aa+tc+rd, 2).to_bytes(1, byteorder='big') + int(ra+z+rcode, 2).to_bytes(1, byteorder='big')
 
 
+def getQuestionDomain(data):
+    isReadingLength = True
+    expectedLength = 0
+    length = 0
+    offset = 0
+    domainString = ''
+    domainParts = []
+
+    for byte in data:
+        if byte == 0:
+            break
+        if isReadingLength == True:
+            # Read length
+            expectedLength = byte
+            isReadingLength = False
+        else:
+            # Read actual data
+            domainString += chr(byte)
+            length += 1
+            if length == expectedLength:
+                domainParts.append(domainString)
+                domainString = ''
+                length = 0
+                isReadingLength = True
+        offset += 1
+
+    questionType = data[offset:offset+2]
+    return (domainParts, questionType)
+
+
+def getZone(domainParts):
+
+    zoneData = loadZones()
+    zoneName = '.'.join(domainParts)
+    return zoneData[zoneName]
+
+
+def getRecs(data):
+    domainParts, questionType = getQuestionDomain(data)
+    qt = ''
+    if questionType == b'\x00\x01':
+        qt = 'a'
+
+    zone = getZone(domainParts)
+    return (zone[qt], qt, domainParts)
+
+
 def buildResponse(data):
 
     # Get transaction ID
@@ -40,6 +102,20 @@ def buildResponse(data):
 
     # Get flags
     flags = getFlags(data[2:4])
+
+    # Question count is one
+    qdcount = b'\x00\x01'
+
+    # Answer count
+    ancount = len(getRecs(data[12:])[0]).to_bytes(2, byteorder='big')
+
+    # Nameserver count is zero
+    nscount = (0).to_bytes(2, byteorder='big')
+
+    # Additional count is zero
+    arcount = (0).to_bytes(2, byteorder='big')
+
+    dnsHeader = transactionID + flags + qdcount + ancount + nscount + arcount
 
 
 # Start listening
